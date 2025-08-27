@@ -31,3 +31,8 @@ async def python(code: str) -> str:
                     content=[TextContent(text=code)])):
         messages.append(message)
     return "\n".join([message.content[0].text for message in messages])
+
+
+if __name__ == "__main__":
+    print("Starting Python MCP Server...")
+    mcp.run()

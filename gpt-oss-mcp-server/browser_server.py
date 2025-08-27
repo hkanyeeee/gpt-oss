@@ -4,7 +4,6 @@ Browser MCP Server - 独立的网页搜索和检索服务
 环境变量配置：
 - SEARXNG_QUERY_URL: SearxNG搜索服务URL (必需)
 - EMBEDDING_SERVICE_URL: 嵌入向量服务URL (必需)
-- RERANKER_SERVICE_URL: 重排序服务URL (可选)
 - QDRANT_HOST: Qdrant向量数据库主机 (默认: localhost)
 - QDRANT_PORT: Qdrant向量数据库端口 (默认: 6333)
 - QDRANT_API_KEY: Qdrant API密钥 (可选)
@@ -15,7 +14,6 @@ Browser MCP Server - 独立的网页搜索和检索服务
 - CHUNK_SIZE: 文本分块大小 (默认: 800)
 - CHUNK_OVERLAP: 分块重叠大小 (默认: 80)
 - RAG_TOP_K: 检索返回数量 (默认: 12)
-- RAG_RERANK_TOP_K: 重排序后返回数量 (默认: 5)
 - EMBEDDING_BATCH_SIZE: 嵌入批处理大小 (默认: 4)
 - WEB_SEARCH_TIMEOUT: 网页抓取超时时间 (默认: 15.0)
 - PLAYWRIGHT_TIMEOUT: Playwright超时时间 (默认: 15.0)
@@ -38,7 +36,7 @@ import httpx
 from bs4 import BeautifulSoup
 from mcp.server.fastmcp import Context, FastMCP
 from sqlalchemy import Column, Integer, String, Text, DateTime, Float, create_engine, select, text
-from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import declarative_base
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import relationship, sessionmaker
 from qdrant_client import QdrantClient, models
@@ -59,7 +57,6 @@ if not EMBEDDING_SERVICE_URL:
     raise EnvironmentError("EMBEDDING_SERVICE_URL environment variable is required")
 
 # 可选环境变量
-RERANKER_SERVICE_URL = get_env_config("RERANKER_SERVICE_URL")
 QDRANT_HOST = get_env_config("QDRANT_HOST", "localhost")
 QDRANT_PORT = get_env_config("QDRANT_PORT", "6333")
 QDRANT_URL = f"http://{QDRANT_HOST}:{QDRANT_PORT}"
@@ -71,7 +68,6 @@ WEB_LOADER_ENGINE = get_env_config("WEB_LOADER_ENGINE", "safe_web")
 CHUNK_SIZE = int(get_env_config("CHUNK_SIZE", "800"))
 CHUNK_OVERLAP = int(get_env_config("CHUNK_OVERLAP", "80"))
 RAG_TOP_K = int(get_env_config("RAG_TOP_K", "12"))
-RAG_RERANK_TOP_K = int(get_env_config("RAG_RERANK_TOP_K", "5"))
 EMBEDDING_BATCH_SIZE = int(get_env_config("EMBEDDING_BATCH_SIZE", "4"))
 WEB_SEARCH_TIMEOUT = float(get_env_config("WEB_SEARCH_TIMEOUT", "15.0"))
 PLAYWRIGHT_TIMEOUT = float(get_env_config("PLAYWRIGHT_TIMEOUT", "15.0"))
@@ -79,7 +75,6 @@ PLAYWRIGHT_TIMEOUT = float(get_env_config("PLAYWRIGHT_TIMEOUT", "15.0"))
 print("=== Browser MCP Server Configuration ===")
 print(f"SEARXNG_QUERY_URL: {SEARXNG_QUERY_URL}")
 print(f"EMBEDDING_SERVICE_URL: {EMBEDDING_SERVICE_URL}")
-print(f"RERANKER_SERVICE_URL: {RERANKER_SERVICE_URL}")
 print(f"QDRANT_URL: {QDRANT_URL}")
 print(f"QDRANT_COLLECTION_NAME: {QDRANT_COLLECTION_NAME}")
 print(f"DATABASE_URL: {DATABASE_URL}")
@@ -197,7 +192,7 @@ async def search_searxng(query: str, count: int = 4) -> List[Dict[str, str]]:
     }
     
     headers = {
-        "User-Agent": "Browser MCP Server",
+        "User-Agent": "Open WebUI (https://github.com/open-webui/open-webui) RAG Bot",
         "Accept": "text/html",
         "Accept-Encoding": "gzip, deflate",
         "Accept-Language": "en-US,en;q=0.5",
@@ -460,36 +455,6 @@ async def query_qdrant(query_embedding: List[float], top_k: int = 12, session_id
         return []
 
 
-async def rerank_results(query: str, results: List[Tuple[Dict, float]]) -> List[Tuple[Dict, float]]:
-    """重排序结果"""
-    if not RERANKER_SERVICE_URL or not results:
-        return results
-    
-    try:
-        documents = [result[0]["content"] for result in results]
-        payload = {
-            "query": query,
-            "documents": documents,
-        }
-        
-        async with httpx.AsyncClient(timeout=300) as client:
-            api_url = f"{RERANKER_SERVICE_URL.rstrip('/')}/rerank"
-            response = await client.post(api_url, json=payload)
-            response.raise_for_status()
-            
-            data = response.json()
-            scores = data.get('scores', [])
-            
-            if len(scores) == len(results):
-                # 创建新的结果列表，使用重排序分数
-                reranked = [(results[i][0], scores[i]) for i in range(len(results))]
-                return sorted(reranked, key=lambda x: x[1], reverse=True)
-        
-        return results
-    except Exception as e:
-        print(f"重排序失败: {e}")
-        return results
-
 
 # MCP工具实现
 @mcp.tool(
@@ -620,14 +585,8 @@ async def find_content(ctx: Context, pattern: str) -> str:
         if not results:
             return f"未找到与 '{pattern}' 相关的内容。请先使用 search 工具搜索相关信息。"
         
-        # 3. 重排序（如果配置了）
-        if RERANKER_SERVICE_URL and len(results) > RAG_RERANK_TOP_K:
-            print("[Find] 开始重排序...")
-            results = await rerank_results(pattern, results)
-            print("[Find] 重排序完成")
-        
         # 取前5个结果
-        top_results = results[:RAG_RERANK_TOP_K]
+        top_results = results[:5]
         
         # 4. 获取源信息
         async with browser_context.db_session_factory() as db:
@@ -660,5 +619,5 @@ async def find_content(ctx: Context, pattern: str) -> str:
 
 
 if __name__ == "__main__":
-    print("Starting Browser MCP Server on port 8001...")
-    print("Use: mcp run -t sse browser_server.py:mcp")
+    print("Starting Browser MCP Server...")
+    mcp.run()

@@ -5,7 +5,7 @@
 ## 功能特性
 
 - **search**: 使用SearxNG搜索网页，抓取内容，生成嵌入向量并存储到向量数据库
-- **find**: 从向量数据库中检索相关内容，支持重排序优化
+- **find**: 从向量数据库中检索相关内容
 
 ## 环境变量配置
 
@@ -14,7 +14,6 @@
 - `EMBEDDING_SERVICE_URL`: 嵌入向量服务URL (支持OpenAI API格式)
 
 ### 可选配置
-- `RERANKER_SERVICE_URL`: 重排序服务URL (可选，用于优化检索结果)
 - `QDRANT_HOST`: Qdrant向量数据库主机 (默认: localhost)
 - `QDRANT_PORT`: Qdrant向量数据库端口 (默认: 6333)
 - `QDRANT_API_KEY`: Qdrant API密钥 (可选)
@@ -25,7 +24,6 @@
 - `CHUNK_SIZE`: 文本分块大小 (默认: 800)
 - `CHUNK_OVERLAP`: 分块重叠大小 (默认: 80)
 - `RAG_TOP_K`: 检索返回数量 (默认: 12)
-- `RAG_RERANK_TOP_K`: 重排序后返回数量 (默认: 5)
 - `EMBEDDING_BATCH_SIZE`: 嵌入批处理大小 (默认: 4)
 - `WEB_SEARCH_TIMEOUT`: 网页抓取超时时间 (默认: 15.0)
 - `PLAYWRIGHT_TIMEOUT`: Playwright超时时间 (默认: 15.0)
@@ -46,7 +44,6 @@ pip install -e .
 ```bash
 export SEARXNG_QUERY_URL="http://localhost:8080/search"
 export EMBEDDING_SERVICE_URL="http://localhost:1234/v1"
-export RERANKER_SERVICE_URL="http://localhost:7997"  # 可选
 export QDRANT_HOST="localhost"
 export QDRANT_PORT="6333"
 ```
@@ -88,8 +85,7 @@ search("人工智能最新发展")
 从向量数据库检索相关内容：
 1. 生成查询向量
 2. 向量相似度搜索
-3. 重排序优化（如果配置）
-4. 返回top 5结果
+3. 返回top 5结果
 
 **参数:**
 - `pattern`: 检索模式/查询
@@ -114,15 +110,11 @@ docker run -d -p 6333:6333 qdrant/qdrant
 ### 嵌入服务
 支持OpenAI API格式的嵌入服务，如LM Studio、Ollama等。
 
-### 重排序服务（可选）
-提供 `/rerank` 接口的重排序服务。
-
 ## 架构说明
 
 1. **数据存储**: 使用SQLite存储元数据，Qdrant存储向量
 2. **文本处理**: 智能分块，保持语义完整性
 3. **向量检索**: 基于余弦相似度的向量搜索
-4. **结果优化**: 可选的重排序提升检索质量
 
 ## 故障排除
 
