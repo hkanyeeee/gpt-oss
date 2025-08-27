@@ -7,7 +7,7 @@ services:
       dockerfile: gpt-oss-mcp-server/Dockerfile
     image: gpt-oss-mcp-server:latest
     container_name: browser-mcp
-    restart: unless-stopped
+    restart: always
     environment:
       - MCP_SERVICE=browser
       # 外部已部署的服务地址（请根据你的实际环境修改/覆盖）
@@ -39,7 +39,7 @@ services:
       dockerfile: gpt-oss-mcp-server/Dockerfile
     image: gpt-oss-mcp-server:latest
     container_name: python-mcp
-    restart: unless-stopped
+    restart: always
     environment:
       - MCP_SERVICE=python
     ports:
