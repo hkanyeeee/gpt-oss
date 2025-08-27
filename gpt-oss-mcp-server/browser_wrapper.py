@@ -53,8 +53,8 @@ DEFAULT_ENV = {
     "QDRANT_COLLECTION_NAME": "browser_mcp",
     "DATABASE_URL": "sqlite+aiosqlite:///./data/mcp_browser.db",
     "WEB_LOADER_ENGINE": "playwright",
-    "CHUNK_SIZE": "800",
-    "CHUNK_OVERLAP": "80",
+    "CHUNK_SIZE": "600",
+    "CHUNK_OVERLAP": "60",
     "RAG_TOP_K": "5"
 }
 

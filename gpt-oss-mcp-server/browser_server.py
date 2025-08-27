@@ -11,8 +11,8 @@ Browser MCP Server - 独立的网页搜索和检索服务
 - DATABASE_URL: SQLite数据库URL (默认: sqlite+aiosqlite:///./data/mcp_browser.db)
 - PROXY_URL: 代理服务器URL (可选)
 - WEB_LOADER_ENGINE: 网页加载引擎 (safe_web/playwright, 默认: safe_web)
-- CHUNK_SIZE: 文本分块大小 (默认: 800)
-- CHUNK_OVERLAP: 分块重叠大小 (默认: 80)
+- CHUNK_SIZE: 文本分块大小 (默认: 600)
+- CHUNK_OVERLAP: 分块重叠大小 (默认: 60)
 - RAG_TOP_K: 检索返回数量 (默认: 12)
 - EMBEDDING_BATCH_SIZE: 嵌入批处理大小 (默认: 4)
 - WEB_SEARCH_TIMEOUT: 网页抓取超时时间 (默认: 15.0)
@@ -65,8 +65,8 @@ QDRANT_COLLECTION_NAME = get_env_config("QDRANT_COLLECTION_NAME", "browser_mcp")
 DATABASE_URL = get_env_config("DATABASE_URL", "sqlite+aiosqlite:///./data/mcp_browser.db")
 PROXY_URL = get_env_config("PROXY_URL")
 WEB_LOADER_ENGINE = get_env_config("WEB_LOADER_ENGINE", "safe_web")
-CHUNK_SIZE = int(get_env_config("CHUNK_SIZE", "800"))
-CHUNK_OVERLAP = int(get_env_config("CHUNK_OVERLAP", "80"))
+CHUNK_SIZE = int(get_env_config("CHUNK_SIZE", "600"))
+CHUNK_OVERLAP = int(get_env_config("CHUNK_OVERLAP", "60"))
 RAG_TOP_K = int(get_env_config("RAG_TOP_K", "12"))
 EMBEDDING_BATCH_SIZE = int(get_env_config("EMBEDDING_BATCH_SIZE", "4"))
 WEB_SEARCH_TIMEOUT = float(get_env_config("WEB_SEARCH_TIMEOUT", "15.0"))
@@ -334,7 +334,7 @@ async def fetch_web_content(url: str) -> Optional[str]:
         return None
 
 
-def chunk_text(text: str, chunk_size: int = 800, chunk_overlap: int = 80) -> List[str]:
+def chunk_text(text: str, chunk_size: int = 600, chunk_overlap: int = 60) -> List[str]:
     """将文本分块"""
     if not text:
         return []
