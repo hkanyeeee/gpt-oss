@@ -2,8 +2,8 @@
 
 if [ "$MCP_SERVICE" = "python" ]; then
     echo "Starting Python MCP Server..."
-    exec mcp run -t sse python_server.py:mcp
+    exec python python_server.py
 else
     echo "Starting Browser MCP Server..."
-    exec mcp run -t sse browser_server.py:mcp
+    exec python browser_server.py
 fi
