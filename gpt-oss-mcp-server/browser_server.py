@@ -193,19 +193,26 @@ async def search_searxng(query: str, count: int = 4) -> List[Dict[str, str]]:
     
     headers = {
         "User-Agent": "Open WebUI (https://github.com/open-webui/open-webui) RAG Bot",
-        "Accept": "text/html",
+        "Accept": "application/json, text/html",  # 改为支持JSON
         "Accept-Encoding": "gzip, deflate",
         "Accept-Language": "en-US,en;q=0.5",
         "Connection": "keep-alive",
     }
     
+    print(f"[SearxNG] 搜索查询: {query}")
+    
     try:
         proxy = PROXY_URL if PROXY_URL else None
-        async with httpx.AsyncClient(timeout=60, proxies=proxy) as client:
+        client_kwargs = {"timeout": 60}
+        if proxy:
+            client_kwargs["proxy"] = proxy
+        async with httpx.AsyncClient(**client_kwargs) as client:
             resp = await client.get(SEARXNG_QUERY_URL, params=params, headers=headers)
             resp.raise_for_status()
+            
             payload = resp.json()
             results = payload.get("results", [])
+            print(f"[SearxNG] 获取到 {len(results)} 个原始结果")
             
             # 按 score 降序排列并限制数量
             results_sorted = sorted(results, key=lambda x: x.get("score", 0), reverse=True)
@@ -220,9 +227,13 @@ async def search_searxng(query: str, count: int = 4) -> List[Dict[str, str]]:
                         "url": url,
                         "snippet": snippet
                     })
+            
+            print(f"[SearxNG] 返回 {len(items)} 个有效结果")
             return items
     except Exception as e:
-        print(f"SearxNG 搜索失败: {e}")
+        print(f"[SearxNG] 搜索失败: {type(e).__name__}: {e}")
+        import traceback
+        print(f"[SearxNG] 错误堆栈: {traceback.format_exc()}")
         return []
 
 
@@ -236,7 +247,10 @@ async def fetch_html(url: str, timeout: float = 15.0) -> str:
     
     try:
         proxy = PROXY_URL if PROXY_URL else None
-        async with httpx.AsyncClient(trust_env=True, headers=headers, proxies=proxy) as client:
+        client_kwargs = {"trust_env": True, "headers": headers}
+        if proxy:
+            client_kwargs["proxy"] = proxy
+        async with httpx.AsyncClient(**client_kwargs) as client:
             resp = await client.get(url, timeout=timeout)
             resp.raise_for_status()
             return resp.text
