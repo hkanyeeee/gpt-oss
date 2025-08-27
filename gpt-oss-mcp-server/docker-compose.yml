@@ -1,0 +1,50 @@
+version: "3.8"
+
+services:
+  browser-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gpt-oss-mcp-server:latest
+    container_name: browser-mcp
+    restart: unless-stopped
+    environment:
+      - MCP_SERVICE=browser
+      # 外部已部署的服务地址（请根据你的实际环境修改/覆盖）
+      - SEARXNG_QUERY_URL=${SEARXNG_QUERY_URL:-http://192.168.31.125:8080/search}
+      - EMBEDDING_SERVICE_URL=${EMBEDDING_SERVICE_URL}
+      - RERANKER_SERVICE_URL=${RERANKER_SERVICE_URL}
+      - QDRANT_HOST=${QDRANT_HOST:-192.168.31.125}
+      - QDRANT_PORT=${QDRANT_PORT:-6333}
+      - QDRANT_API_KEY=${QDRANT_API_KEY}
+      - QDRANT_COLLECTION_NAME=${QDRANT_COLLECTION_NAME:-browser_mcp}
+      - DATABASE_URL=${DATABASE_URL:-sqlite+aiosqlite:///./data/mcp_browser.db}
+      - PROXY_URL=${PROXY_URL}
+      - WEB_LOADER_ENGINE=${WEB_LOADER_ENGINE:-safe_web}
+      - CHUNK_SIZE=${CHUNK_SIZE:-800}
+      - CHUNK_OVERLAP=${CHUNK_OVERLAP:-80}
+      - RAG_TOP_K=${RAG_TOP_K:-12}
+      - RAG_RERANK_TOP_K=${RAG_RERANK_TOP_K:-5}
+      - EMBEDDING_BATCH_SIZE=${EMBEDDING_BATCH_SIZE:-4}
+      - WEB_SEARCH_TIMEOUT=${WEB_SEARCH_TIMEOUT:-15.0}
+      - PLAYWRIGHT_TIMEOUT=${PLAYWRIGHT_TIMEOUT:-15.0}
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./data:/app/data
+
+  python-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: gpt-oss-mcp-server:latest
+    container_name: python-mcp
+    restart: unless-stopped
+    environment:
+      - MCP_SERVICE=python
+    ports:
+      - "8002:8001"  # python_server 默认也用 8001，映射到主机 8002
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock  # 挂载 Docker socket 以便容器内调用 Docker
+      - ./data:/app/data
+
