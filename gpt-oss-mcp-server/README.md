@@ -1,29 +1,132 @@
-# MCP Servers for gpt-oss reference tools
+# Browser MCP Server
 
-This directory contains MCP servers for the reference tools in the [gpt-oss](https://github.com/openai/gpt-oss) repository.
-You can set up these tools behind MCP servers and use them in your applications.
-For inference service that integrates with MCP, you can also use these as reference tools.
+独立的网页搜索和检索MCP服务器，提供完整的网页搜索、内容抓取、向量化存储和智能检索功能。
 
-In particular, this directory contains a `build-system-prompt.py` script that will generate exactly the same system prompt as `reference-system-prompt.py`.
-The build system prompt script show case all the care needed to automatically discover the tools and construct the system prompt before feeding it into Harmony.
+## 功能特性
 
-## Usage
+- **search**: 使用SearxNG搜索网页，抓取内容，生成嵌入向量并存储到向量数据库
+- **find**: 从向量数据库中检索相关内容，支持重排序优化
+
+## 环境变量配置
+
+### 必需配置
+- `SEARXNG_QUERY_URL`: SearxNG搜索服务URL
+- `EMBEDDING_SERVICE_URL`: 嵌入向量服务URL (支持OpenAI API格式)
+
+### 可选配置
+- `RERANKER_SERVICE_URL`: 重排序服务URL (可选，用于优化检索结果)
+- `QDRANT_HOST`: Qdrant向量数据库主机 (默认: localhost)
+- `QDRANT_PORT`: Qdrant向量数据库端口 (默认: 6333)
+- `QDRANT_API_KEY`: Qdrant API密钥 (可选)
+- `QDRANT_COLLECTION_NAME`: Qdrant集合名称 (默认: browser_mcp)
+- `DATABASE_URL`: SQLite数据库URL (默认: sqlite+aiosqlite:///./data/mcp_browser.db)
+- `PROXY_URL`: 代理服务器URL (可选)
+- `WEB_LOADER_ENGINE`: 网页加载引擎 (safe_web/playwright, 默认: safe_web)
+- `CHUNK_SIZE`: 文本分块大小 (默认: 800)
+- `CHUNK_OVERLAP`: 分块重叠大小 (默认: 80)
+- `RAG_TOP_K`: 检索返回数量 (默认: 12)
+- `RAG_RERANK_TOP_K`: 重排序后返回数量 (默认: 5)
+- `EMBEDDING_BATCH_SIZE`: 嵌入批处理大小 (默认: 4)
+- `WEB_SEARCH_TIMEOUT`: 网页抓取超时时间 (默认: 15.0)
+- `PLAYWRIGHT_TIMEOUT`: Playwright超时时间 (默认: 15.0)
+
+## 安装和启动
+
+### 1. 安装依赖
 
 ```bash
-# Install the dependencies
-uv pip install -r requirements.txt
+cd gpt-oss-mcp-server
+pip install -e .
 ```
 
+### 2. 配置环境变量
+
+创建 `.env` 文件或设置环境变量：
+
 ```bash
-# Assume we have harmony and gpt-oss installed
-uv pip install mcp[cli]
-# start the servers
+export SEARXNG_QUERY_URL="http://localhost:8080/search"
+export EMBEDDING_SERVICE_URL="http://localhost:1234/v1"
+export RERANKER_SERVICE_URL="http://localhost:7997"  # 可选
+export QDRANT_HOST="localhost"
+export QDRANT_PORT="6333"
+```
+
+### 3. 启动服务
+
+```bash
 mcp run -t sse browser_server.py:mcp
-mcp run -t sse python_server.py:mcp
 ```
 
-You can now use MCP inspector to play with the tools.
-Once opened, set SSE to `http://localhost:8001/sse` and `http://localhost:8000/sse` respectively.
+服务将在端口8001上启动。
 
-To compare the system prompt and see how to construct it via MCP service discovery, see `build-system-prompt.py`.
-This script will generate exactly the same system prompt as `reference-system-prompt.py`.
+### 4. 测试服务
+
+使用MCP Inspector测试工具：
+- 设置SSE到 `http://localhost:8001/sse`
+
+## 工具说明
+
+### search工具
+
+搜索网页并处理结果，包括：
+1. 使用SearxNG搜索（固定返回4个结果）
+2. 并发抓取网页内容
+3. 文本分块处理
+4. 生成嵌入向量
+5. 存储到向量数据库
+
+**参数:**
+- `query`: 搜索查询字符串
+
+**示例:**
+```
+search("人工智能最新发展")
+```
+
+### find工具
+
+从向量数据库检索相关内容：
+1. 生成查询向量
+2. 向量相似度搜索
+3. 重排序优化（如果配置）
+4. 返回top 5结果
+
+**参数:**
+- `pattern`: 检索模式/查询
+
+**示例:**
+```
+find("机器学习算法")
+```
+
+## 依赖服务
+
+### SearxNG搜索引擎
+```bash
+docker run -d -p 8080:8080 searxng/searxng
+```
+
+### Qdrant向量数据库
+```bash
+docker run -d -p 6333:6333 qdrant/qdrant
+```
+
+### 嵌入服务
+支持OpenAI API格式的嵌入服务，如LM Studio、Ollama等。
+
+### 重排序服务（可选）
+提供 `/rerank` 接口的重排序服务。
+
+## 架构说明
+
+1. **数据存储**: 使用SQLite存储元数据，Qdrant存储向量
+2. **文本处理**: 智能分块，保持语义完整性
+3. **向量检索**: 基于余弦相似度的向量搜索
+4. **结果优化**: 可选的重排序提升检索质量
+
+## 故障排除
+
+1. **导入错误**: 确保所有依赖都已正确安装
+2. **连接失败**: 检查各服务的URL配置和网络连通性
+3. **搜索无结果**: 验证SearxNG服务是否正常运行
+4. **向量存储失败**: 检查Qdrant服务状态和权限
