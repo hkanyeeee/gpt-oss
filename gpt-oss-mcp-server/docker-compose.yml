@@ -3,8 +3,8 @@ version: "3.8"
 services:
   browser-mcp:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..  # 使用上级目录作为构建上下文
+      dockerfile: gpt-oss-mcp-server/Dockerfile
     image: gpt-oss-mcp-server:latest
     container_name: browser-mcp
     restart: unless-stopped
@@ -35,8 +35,8 @@ services:
 
   python-mcp:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ..  # 使用上级目录作为构建上下文
+      dockerfile: gpt-oss-mcp-server/Dockerfile
     image: gpt-oss-mcp-server:latest
     container_name: python-mcp
     restart: unless-stopped

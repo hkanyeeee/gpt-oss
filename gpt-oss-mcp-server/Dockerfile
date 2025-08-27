@@ -29,10 +29,10 @@ RUN pip install --no-cache-dir \
       "openai-harmony"
 
 # 复制 gpt_oss 包源码（python_server 需要依赖它）
-COPY ../gpt_oss /app/gpt_oss
+COPY gpt_oss /app/gpt_oss
 
 # 复制 MCP 服务器源码
-COPY browser_server.py python_server.py start.sh ./
+COPY gpt-oss-mcp-server/browser_server.py gpt-oss-mcp-server/python_server.py gpt-oss-mcp-server/start.sh ./
 RUN chmod +x start.sh
 
 # 数据目录（SQLite 默认写入 ./data/mcp_browser.db）
