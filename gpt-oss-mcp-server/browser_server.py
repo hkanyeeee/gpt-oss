@@ -14,32 +14,27 @@ Browser MCP Server - 独立的网页搜索和检索服务
 - CHUNK_SIZE: 文本分块大小 (默认: 600)
 - CHUNK_OVERLAP: 分块重叠大小 (默认: 60)
 - RAG_TOP_K: 检索返回数量 (默认: 8)
-- EMBEDDING_BATCH_SIZE: 嵌入批处理大小 (默认: 4)
-- WEB_SEARCH_TIMEOUT: 网页抓取超时时间 (默认: 15.0)
-- PLAYWRIGHT_TIMEOUT: Playwright超时时间 (默认: 15.0)
+- EMBEDDING_BATCH_SIZE: 嵌入批处理大小 (默认: 12)
+- WEB_SEARCH_TIMEOUT: 网页抓取超时时间 (默认: 30.0)
+- PLAYWRIGHT_TIMEOUT: Playwright超时时间 (默认: 30.0)
 """
 
 import os
 import re
 import uuid
 import asyncio
-import json
-import time
-import hashlib
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Optional, Tuple
 from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
-from urllib.parse import urlparse
 from datetime import datetime
 
 import httpx
 from bs4 import BeautifulSoup
 from mcp.server.fastmcp import Context, FastMCP
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
-from sqlalchemy import Column, Integer, String, Text, DateTime, Float, create_engine, select, text
+from sqlalchemy import Column, Integer, String, Text, DateTime, select, text
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy.orm import relationship, sessionmaker
 from qdrant_client import QdrantClient, models
 from qdrant_client.http.models import Distance, VectorParams
 
@@ -69,9 +64,9 @@ WEB_LOADER_ENGINE = get_env_config("WEB_LOADER_ENGINE", "safe_web")
 CHUNK_SIZE = int(get_env_config("CHUNK_SIZE", "600"))
 CHUNK_OVERLAP = int(get_env_config("CHUNK_OVERLAP", "60"))
 RAG_TOP_K = int(get_env_config("RAG_TOP_K", "8"))
-EMBEDDING_BATCH_SIZE = int(get_env_config("EMBEDDING_BATCH_SIZE", "4"))
-WEB_SEARCH_TIMEOUT = float(get_env_config("WEB_SEARCH_TIMEOUT", "15.0"))
-PLAYWRIGHT_TIMEOUT = float(get_env_config("PLAYWRIGHT_TIMEOUT", "15.0"))
+EMBEDDING_BATCH_SIZE = int(get_env_config("EMBEDDING_BATCH_SIZE", "12"))
+WEB_SEARCH_TIMEOUT = float(get_env_config("WEB_SEARCH_TIMEOUT", "30.0"))
+PLAYWRIGHT_TIMEOUT = float(get_env_config("PLAYWRIGHT_TIMEOUT", "30.0"))
 
 print("=== Browser MCP Server Configuration ===")
 print(f"SEARXNG_QUERY_URL: {SEARXNG_QUERY_URL}")
@@ -205,7 +200,7 @@ async def search_searxng(query: str, count: int = 4) -> List[Dict[str, str]]:
     
     try:
         proxy = PROXY_URL if PROXY_URL else None
-        client_kwargs = {"timeout": 60}
+        client_kwargs = {"timeout": 120}
         if proxy:
             client_kwargs["proxy"] = proxy
         async with httpx.AsyncClient(**client_kwargs) as client:
@@ -434,7 +429,7 @@ async def fetch_web_content(url: str) -> Optional[str]:
                     print(f"[WebContent] Playwright 模式内容不足，回退到 safe_web: {url}")
             except Exception as e:
                 print(f"[WebContent] Playwright 模式失败 {url}: {e}")
-                print(f"[WebContent] 自动回退到 safe_web 模式...")
+                print("[WebContent] 自动回退到 safe_web 模式...")
         
         # 使用 safe_web 模式（默认或回退）
         try:
@@ -487,27 +482,39 @@ def chunk_text(text: str, chunk_size: int = 600, chunk_overlap: int = 60) -> Lis
 
 
 async def embed_texts(texts: List[str], model: str = "text-embedding-3-small") -> List[List[float]]:
-    """生成文本嵌入向量"""
+    """生成文本嵌入向量，按EMBEDDING_BATCH_SIZE分批处理"""
     if not texts:
         return []
     
-    payload = {
-        "input": texts,
-        "model": model
-    }
+    all_embeddings = []
     
-    try:
-        async with httpx.AsyncClient(timeout=300) as client:
-            resp = await client.post(
-                f"{EMBEDDING_SERVICE_URL.rstrip('/')}/embeddings",
-                json=payload
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return [item["embedding"] for item in data["data"]]
-    except Exception as e:
-        print(f"嵌入向量生成失败: {e}")
-        return []
+    # 按批次处理
+    for i in range(0, len(texts), EMBEDDING_BATCH_SIZE):
+        batch_texts = texts[i:i + EMBEDDING_BATCH_SIZE]
+        print(f"[Embedding] 处理批次 {i//EMBEDDING_BATCH_SIZE + 1}/{(len(texts)-1)//EMBEDDING_BATCH_SIZE + 1} (包含 {len(batch_texts)} 个文本)")
+        
+        payload = {
+            "input": batch_texts,
+            "model": model
+        }
+        
+        try:
+            async with httpx.AsyncClient(timeout=300) as client:
+                resp = await client.post(
+                    f"{EMBEDDING_SERVICE_URL.rstrip('/')}/embeddings",
+                    json=payload
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                batch_embeddings = [item["embedding"] for item in data["data"]]
+                all_embeddings.extend(batch_embeddings)
+                print(f"[Embedding] 批次处理完成，获得 {len(batch_embeddings)} 个向量")
+        except Exception as e:
+            print(f"嵌入向量生成失败 (批次 {i//EMBEDDING_BATCH_SIZE + 1}): {e}")
+            return []
+    
+    print(f"[Embedding] 所有批次处理完成，总共生成 {len(all_embeddings)} 个向量")
+    return all_embeddings
 
 
 async def ensure_qdrant_collection(vector_size: int):
@@ -592,6 +599,62 @@ async def query_qdrant(query_embedding: List[float], top_k: int = 8, session_id:
         return []
 
 
+async def check_urls_exist(urls: List[str]) -> Dict[str, bool]:
+    """检查URLs是否已存在于数据库中"""
+    async with browser_context.db_session_factory() as db:
+        existing_urls = {}
+        for url in urls:
+            source_query = select(Source).where(Source.url == url)
+            result = await db.execute(source_query)
+            source = result.scalar_one_or_none()
+            existing_urls[url] = source is not None
+        return existing_urls
+
+
+async def cleanup_old_data():
+    """清理一周前的旧数据"""
+    try:
+        from datetime import datetime, timedelta
+        cutoff_date = datetime.utcnow() - timedelta(days=7)
+        
+        async with browser_context.db_session_factory() as db:
+            # 获取要删除的chunk IDs，用于清理Qdrant
+            old_chunks_query = select(Chunk).join(Source).where(Source.created_at < cutoff_date)
+            result = await db.execute(old_chunks_query)
+            old_chunks = result.scalars().all()
+            chunk_ids = [chunk.id for chunk in old_chunks]
+            
+            # 删除旧的chunks
+            chunks_delete_query = text("DELETE FROM chunks WHERE id IN (SELECT c.id FROM chunks c JOIN sources s ON c.source_id = s.id WHERE s.created_at < :cutoff_date)")
+            await db.execute(chunks_delete_query, {"cutoff_date": cutoff_date})
+            
+            # 删除旧的sources
+            sources_delete_query = text("DELETE FROM sources WHERE created_at < :cutoff_date")
+            result = await db.execute(sources_delete_query, {"cutoff_date": cutoff_date})
+            deleted_count = result.rowcount
+            
+            await db.commit()
+            
+            # 清理Qdrant中的对应向量
+            if browser_context.qdrant_client and chunk_ids:
+                try:
+                    browser_context.qdrant_client.delete(
+                        collection_name=QDRANT_COLLECTION_NAME,
+                        points_selector=models.PointIdsList(
+                            points=chunk_ids
+                        )
+                    )
+                    print(f"[Cleanup] 从Qdrant删除了 {len(chunk_ids)} 个向量点")
+                except Exception as e:
+                    print(f"[Cleanup] Qdrant清理失败: {e}")
+            
+            print(f"[Cleanup] 清理完成，删除了 {deleted_count} 个旧源记录")
+            return deleted_count
+    except Exception as e:
+        print(f"[Cleanup] 数据清理失败: {e}")
+        return 0
+
+
 
 # MCP工具实现
 @mcp.tool(
@@ -604,91 +667,140 @@ async def search(ctx: Context, query: str) -> str:
     try:
         print(f"[Search] 开始搜索: {query}")
         
+        # 0. 定期清理旧数据
+        await cleanup_old_data()
+        
         # 1. SearxNG搜索
-        search_results = await search_searxng(query, count=4)
+        search_results = await search_searxng(query, count=5)  # 增加搜索数量以便去重后有足够结果
         if not search_results:
             return f"搜索查询 '{query}' 没有找到任何结果。"
         
-        print(f"[Search] 找到 {len(search_results)} 个搜索结果")
+        print(f"[Search] 找到 {len(search_results)} 个原始搜索结果")
         
-        # 2. 并发抓取网页内容
-        print(f"[Search] 开始抓取网页内容...")
-        fetch_tasks = [fetch_web_content(result["url"]) for result in search_results]
-        contents = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+        # 2. URL去重
+        seen_urls = set()
+        deduped_results = []
+        for result in search_results:
+            url = result["url"]
+            if url not in seen_urls:
+                seen_urls.add(url)
+                deduped_results.append(result)
         
-        # 3. 过滤有效内容
+        # 限制到4个结果
+        deduped_results = deduped_results[:4]
+        print(f"[Search] 去重后剩余 {len(deduped_results)} 个搜索结果")
+        
+        # 3. 检查哪些URL已存在于数据库
+        urls = [result["url"] for result in deduped_results]
+        existing_urls = await check_urls_exist(urls)
+        
+        # 分离新URL和已存在URL
+        new_results = []
+        existing_results = []
+        for result in deduped_results:
+            url = result["url"]
+            if existing_urls[url]:
+                existing_results.append(result)
+            else:
+                new_results.append(result)
+        
+        print(f"[Search] 发现 {len(existing_results)} 个已存在的URL，{len(new_results)} 个新URL")
+        
+        # 4. 只对新URL进行抓取和处理
         valid_documents = []
-        for i, (result, content) in enumerate(zip(search_results, contents)):
-            if isinstance(content, str) and content.strip() and len(content) > 100:
-                valid_documents.append({
-                    "title": result["title"],
-                    "url": result["url"],
-                    "content": content.strip(),
-                    "snippet": result.get("snippet", "")
-                })
+        if new_results:
+            print(f"[Search] 开始抓取 {len(new_results)} 个新网页内容...")
+            fetch_tasks = [fetch_web_content(result["url"]) for result in new_results]
+            contents = await asyncio.gather(*fetch_tasks, return_exceptions=True)
+            
+            # 5. 过滤有效内容
+            for i, (result, content) in enumerate(zip(new_results, contents)):
+                if isinstance(content, str) and content.strip() and len(content) > 100:
+                    valid_documents.append({
+                        "title": result["title"],
+                        "url": result["url"],
+                        "content": content.strip(),
+                        "snippet": result.get("snippet", ""),
+                        "is_new": True
+                    })
         
-        if not valid_documents:
-            return f"搜索到 {len(search_results)} 个结果，但无法成功抓取任何网页内容。"
+        # 添加已存在的URLs到结果中（不需要重新处理）
+        for result in existing_results:
+            valid_documents.append({
+                "title": result["title"],
+                "url": result["url"],
+                "content": "",  # 已存在的内容不需要显示
+                "snippet": result.get("snippet", ""),
+                "is_new": False
+            })
         
-        print(f"[Search] 成功抓取 {len(valid_documents)} 个文档")
+        print(f"[Search] 新抓取 {len([d for d in valid_documents if d.get('is_new', False)])} 个文档，{len([d for d in valid_documents if not d.get('is_new', True)])} 个已存在")
         
-        # 4. 存储到数据库并生成嵌入
+        # 6. 存储新文档到数据库并生成嵌入
         session_id = browser_context.session_id
-        async with browser_context.db_session_factory() as db:
-            all_chunks = []
-            source_ids = []
-            
-            for doc in valid_documents:
-                # 创建Source记录
-                source = Source(
-                    session_id=session_id,
-                    url=doc["url"],
-                    title=doc["title"],
-                    content=doc["content"][:1000] + "..." if len(doc["content"]) > 1000 else doc["content"]
-                )
-                db.add(source)
-                await db.flush()
-                source_ids.append(source.id)
+        new_documents = [doc for doc in valid_documents if doc.get('is_new', False)]
+        
+        if new_documents:
+            async with browser_context.db_session_factory() as db:
+                all_chunks = []
                 
-                # 分块
-                chunks = chunk_text(doc["content"], CHUNK_SIZE, CHUNK_OVERLAP)
-                for i, chunk_content in enumerate(chunks):
-                    chunk = Chunk(
+                for doc in new_documents:
+                    # 创建Source记录
+                    source = Source(
                         session_id=session_id,
-                        source_id=source.id,
-                        chunk_id=i,
-                        content=chunk_content
+                        url=doc["url"],
+                        title=doc["title"],
+                        content=doc["content"][:1000] + "..." if len(doc["content"]) > 1000 else doc["content"]
                     )
-                    db.add(chunk)
-                    all_chunks.append(chunk)
+                    db.add(source)
+                    await db.flush()
+                    
+                    # 分块
+                    chunks = chunk_text(doc["content"], CHUNK_SIZE, CHUNK_OVERLAP)
+                    for i, chunk_content in enumerate(chunks):
+                        chunk = Chunk(
+                            session_id=session_id,
+                            source_id=source.id,
+                            chunk_id=i,
+                            content=chunk_content
+                        )
+                        db.add(chunk)
+                        all_chunks.append(chunk)
+                
+                await db.commit()
+                
+                # 刷新获取ID
+                for chunk in all_chunks:
+                    await db.refresh(chunk)
             
-            await db.commit()
-            
-            # 刷新获取ID
-            for chunk in all_chunks:
-                await db.refresh(chunk)
+            # 7. 生成嵌入向量并存储到Qdrant
+            if all_chunks:
+                print(f"[Search] 开始生成 {len(all_chunks)} 个块的嵌入向量...")
+                texts = [chunk.content for chunk in all_chunks]
+                embeddings = await embed_texts(texts)
+                
+                if embeddings:
+                    await add_embeddings_to_qdrant(0, all_chunks, embeddings)
+                    print("[Search] 嵌入向量存储完成")
         
-        # 5. 生成嵌入向量并存储到Qdrant
-        if all_chunks:
-            print(f"[Search] 开始生成 {len(all_chunks)} 个块的嵌入向量...")
-            texts = [chunk.content for chunk in all_chunks]
-            embeddings = await embed_texts(texts)
-            
-            if embeddings:
-                await add_embeddings_to_qdrant(0, all_chunks, embeddings)
-                print("[Search] 嵌入向量存储完成")
+        # 8. 格式化返回结果
+        total_results = len(deduped_results)
+        new_processed = len(new_documents)
+        existing_found = len(existing_results)
         
-        # 6. 格式化返回结果
-        result_lines = [f"搜索查询 '{query}' 完成，共处理了 {len(valid_documents)} 个网页：\n"]
+        result_lines = [f"搜索查询 '{query}' 完成，共找到 {total_results} 个结果："]
+        result_lines.append(f"- 新处理: {new_processed} 个网页")
+        result_lines.append(f"- 已存在: {existing_found} 个网页\n")
         
         for i, doc in enumerate(valid_documents, 1):
-            result_lines.append(f"{i}. {doc['title']}")
+            status = "新" if doc.get('is_new', False) else "已存在"
+            result_lines.append(f"{i}. [{status}] {doc['title']}")
             result_lines.append(f"   URL: {doc['url']}")
             if doc.get('snippet'):
                 result_lines.append(f"   摘要: {doc['snippet'][:200]}...")
             result_lines.append("")
         
-        result_lines.append("所有内容已成功索引到向量数据库，可使用 find 工具进行检索。")
+        result_lines.append("所有内容已索引到向量数据库，可使用 find 工具进行检索。")
         
         return "\n".join(result_lines)
         
@@ -701,23 +813,22 @@ async def search(ctx: Context, query: str) -> str:
 @mcp.tool(
     name="find",
     title="Find relevant content",
-    description="Retrieve relevant content from vector database. Returns top 8 results.",
+    description="Retrieve relevant content from vector database using global search. Returns top 8 results.",
 )
 async def find_content(ctx: Context, pattern: str) -> str:
-    """从向量数据库中检索相关内容"""
+    """从向量数据库中检索相关内容（全库检索）"""
     try:
-        print(f"[Find] 开始检索: {pattern}")
+        print(f"[Find] 开始全库检索: {pattern}")
         
         # 1. 生成查询向量
         query_embeddings = await embed_texts([pattern])
         if not query_embeddings:
-            return f"无法生成查询向量。"
+            return "无法生成查询向量。"
         
         query_embedding = query_embeddings[0]
         
-        # 2. 向量检索
-        session_id = browser_context.session_id
-        top_results = await query_qdrant(query_embedding, top_k=RAG_TOP_K, session_id=session_id)
+        # 2. 向量检索（全库搜索，不按session_id过滤）
+        top_results = await query_qdrant(query_embedding, top_k=RAG_TOP_K, session_id=None)
         
         if not top_results:
             return f"未找到与 '{pattern}' 相关的内容。请先使用 search 工具搜索相关信息。"
@@ -740,7 +851,7 @@ async def find_content(ctx: Context, pattern: str) -> str:
                     result_lines.append(f"   来源: {source.title}")
                     result_lines.append(f"   URL: {source.url}")
                 else:
-                    result_lines.append(f"   来源: Unknown")
+                    result_lines.append("   来源: Unknown")
                 result_lines.append(f"   内容: {content[:300]}...")
                 result_lines.append("")
         
