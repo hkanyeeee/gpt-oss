@@ -13,7 +13,7 @@ Browser MCP Server - 独立的网页搜索和检索服务
 - WEB_LOADER_ENGINE: 网页加载引擎 (safe_web/playwright, 默认: safe_web)
 - CHUNK_SIZE: 文本分块大小 (默认: 600)
 - CHUNK_OVERLAP: 分块重叠大小 (默认: 60)
-- RAG_TOP_K: 检索返回数量 (默认: 12)
+- RAG_TOP_K: 检索返回数量 (默认: 8)
 - EMBEDDING_BATCH_SIZE: 嵌入批处理大小 (默认: 4)
 - WEB_SEARCH_TIMEOUT: 网页抓取超时时间 (默认: 15.0)
 - PLAYWRIGHT_TIMEOUT: Playwright超时时间 (默认: 15.0)
@@ -67,7 +67,7 @@ PROXY_URL = get_env_config("PROXY_URL")
 WEB_LOADER_ENGINE = get_env_config("WEB_LOADER_ENGINE", "safe_web")
 CHUNK_SIZE = int(get_env_config("CHUNK_SIZE", "600"))
 CHUNK_OVERLAP = int(get_env_config("CHUNK_OVERLAP", "60"))
-RAG_TOP_K = int(get_env_config("RAG_TOP_K", "12"))
+RAG_TOP_K = int(get_env_config("RAG_TOP_K", "8"))
 EMBEDDING_BATCH_SIZE = int(get_env_config("EMBEDDING_BATCH_SIZE", "4"))
 WEB_SEARCH_TIMEOUT = float(get_env_config("WEB_SEARCH_TIMEOUT", "15.0"))
 PLAYWRIGHT_TIMEOUT = float(get_env_config("PLAYWRIGHT_TIMEOUT", "15.0"))
@@ -432,7 +432,7 @@ async def add_embeddings_to_qdrant(source_id: int, chunks: List[Chunk], embeddin
         )
 
 
-async def query_qdrant(query_embedding: List[float], top_k: int = 12, session_id: str = None) -> List[Tuple[Dict, float]]:
+async def query_qdrant(query_embedding: List[float], top_k: int = 8, session_id: str = None) -> List[Tuple[Dict, float]]:
     """查询Qdrant向量数据库"""
     if not browser_context.qdrant_client:
         return []
@@ -578,7 +578,7 @@ async def search(ctx: Context, query: str) -> str:
 @mcp.tool(
     name="find",
     title="Find relevant content",
-    description="Retrieve relevant content from vector database. Returns top 5 results.",
+    description="Retrieve relevant content from vector database. Returns top 8 results.",
 )
 async def find_content(ctx: Context, pattern: str) -> str:
     """从向量数据库中检索相关内容"""
@@ -594,13 +594,10 @@ async def find_content(ctx: Context, pattern: str) -> str:
         
         # 2. 向量检索
         session_id = browser_context.session_id
-        results = await query_qdrant(query_embedding, top_k=RAG_TOP_K, session_id=session_id)
+        top_results = await query_qdrant(query_embedding, top_k=RAG_TOP_K, session_id=session_id)
         
-        if not results:
+        if not top_results:
             return f"未找到与 '{pattern}' 相关的内容。请先使用 search 工具搜索相关信息。"
-        
-        # 取前5个结果
-        top_results = results[:5]
         
         # 4. 获取源信息
         async with browser_context.db_session_factory() as db:
