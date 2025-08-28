@@ -15,8 +15,8 @@ Browser MCP Server - 独立的网页搜索和检索服务
 - CHUNK_OVERLAP: 分块重叠大小 (默认: 60)
 - RAG_TOP_K: 检索返回数量 (默认: 8)
 - EMBEDDING_BATCH_SIZE: 嵌入批处理大小 (默认: 12)
-- WEB_SEARCH_TIMEOUT: 网页抓取超时时间 (默认: 30.0)
-- PLAYWRIGHT_TIMEOUT: Playwright超时时间 (默认: 30.0)
+- WEB_SEARCH_TIMEOUT: 网页抓取超时时间 (默认: 60.0)
+- PLAYWRIGHT_TIMEOUT: Playwright超时时间 (默认: 60.0)
 """
 
 import os
@@ -65,8 +65,8 @@ CHUNK_SIZE = int(get_env_config("CHUNK_SIZE", "600"))
 CHUNK_OVERLAP = int(get_env_config("CHUNK_OVERLAP", "60"))
 RAG_TOP_K = int(get_env_config("RAG_TOP_K", "8"))
 EMBEDDING_BATCH_SIZE = int(get_env_config("EMBEDDING_BATCH_SIZE", "12"))
-WEB_SEARCH_TIMEOUT = float(get_env_config("WEB_SEARCH_TIMEOUT", "30.0"))
-PLAYWRIGHT_TIMEOUT = float(get_env_config("PLAYWRIGHT_TIMEOUT", "30.0"))
+WEB_SEARCH_TIMEOUT = float(get_env_config("WEB_SEARCH_TIMEOUT", "60.0"))
+PLAYWRIGHT_TIMEOUT = float(get_env_config("PLAYWRIGHT_TIMEOUT", "60.0"))
 
 print("=== Browser MCP Server Configuration ===")
 print(f"SEARXNG_QUERY_URL: {SEARXNG_QUERY_URL}")
