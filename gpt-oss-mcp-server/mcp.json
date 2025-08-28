@@ -1,0 +1,31 @@
+{
+    "mcpServers": {
+      "browser": {
+        "command": "python",
+        "args": [
+          "gpt-oss-mcp-server/browser_wrapper.py"
+        ],
+        "cwd": "/Users/cofiavcin/code/gpt-oss",
+        "env": {
+          "SEARXNG_QUERY_URL": "http://192.168.31.125:8080/search",
+          "EMBEDDING_SERVICE_URL": "http://192.168.31.125:7998/v1",
+          "QDRANT_HOST": "192.168.31.125",
+          "QDRANT_PORT": "6333"
+        }
+      },
+      "python": {
+        "command": "python",
+        "args": [
+          "gpt-oss-mcp-server/python_wrapper.py"
+        ],
+        "cwd": "/Users/cofiavcin/code/gpt-oss"
+      },
+      "context7": {
+        "command": "npx",
+        "args": [
+          "-y",
+          "@upstash/context7-mcp"
+        ]
+      }
+    }
+  }
