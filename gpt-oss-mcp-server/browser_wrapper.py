@@ -44,26 +44,6 @@ def load_env_file(env_file_path: str = ".env"):
 # 首先尝试加载.env文件
 load_env_file()
 
-# 设置默认环境变量（如果未设置）
-DEFAULT_ENV = {
-    "SEARXNG_QUERY_URL": "http://192.168.31.125:8080/search",
-    "EMBEDDING_SERVICE_URL": "http://192.168.31.125:7998/v1", 
-    "QDRANT_HOST": "192.168.31.125",
-    "QDRANT_PORT": "6333",
-    "QDRANT_COLLECTION_NAME": "browser_mcp",
-    "DATABASE_URL": "sqlite+aiosqlite:///./data/mcp_browser.db",
-    "WEB_LOADER_ENGINE": "playwright",
-    "CHUNK_SIZE": "600",
-    "CHUNK_OVERLAP": "60",
-    "RAG_TOP_K": "8"
-}
-
-# 设置默认环境变量（仅在环境变量不存在时）
-for key, value in DEFAULT_ENV.items():
-    if key not in os.environ:
-        os.environ[key] = value
-        print(f"使用默认值: {key}={value}")
-
 # 导入并运行主服务器
 if __name__ == "__main__":
     # 确保当前目录在Python路径中
