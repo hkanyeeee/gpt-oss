@@ -55,7 +55,7 @@ DEFAULT_ENV = {
     "WEB_LOADER_ENGINE": "playwright",
     "CHUNK_SIZE": "600",
     "CHUNK_OVERLAP": "60",
-    "RAG_TOP_K": "5"
+    "RAG_TOP_K": "8"
 }
 
 # 设置默认环境变量（仅在环境变量不存在时）

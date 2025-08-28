@@ -35,6 +35,7 @@ from datetime import datetime
 import httpx
 from bs4 import BeautifulSoup
 from mcp.server.fastmcp import Context, FastMCP
+from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeoutError
 from sqlalchemy import Column, Integer, String, Text, DateTime, Float, create_engine, select, text
 from sqlalchemy.orm import declarative_base
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -79,6 +80,7 @@ print(f"QDRANT_URL: {QDRANT_URL}")
 print(f"QDRANT_COLLECTION_NAME: {QDRANT_COLLECTION_NAME}")
 print(f"DATABASE_URL: {DATABASE_URL}")
 print(f"WEB_LOADER_ENGINE: {WEB_LOADER_ENGINE}")
+print(f"PLAYWRIGHT_TIMEOUT: {PLAYWRIGHT_TIMEOUT}")
 print(f"CHUNK_SIZE: {CHUNK_SIZE}")
 print(f"RAG_TOP_K: {RAG_TOP_K}")
 print("==========================================")
@@ -259,6 +261,97 @@ async def fetch_html(url: str, timeout: float = 15.0) -> str:
         return ""
 
 
+async def fetch_rendered_text(
+    url: str,
+    selector: str = "article",
+    timeout: float = 15.0,
+    min_chars: int = 200,
+    max_nodes_check: int = 200,
+) -> str:
+    """
+    使用 Playwright 抓取页面渲染后的可见文本
+    支持穿透 Shadow DOM 和动态内容
+    """
+    headers = {
+        "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"),
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+    }
+    
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context_kwargs = {"user_agent": headers["User-Agent"]}
+        if PROXY_URL:
+            context_kwargs["proxy"] = {"server": PROXY_URL}
+        context = await browser.new_context(**context_kwargs)
+        page = await context.new_page()
+        
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=timeout * 1000)
+
+            if selector:
+                try:
+                    await page.wait_for_selector(selector, timeout=timeout * 1000)
+                except PlaywrightTimeoutError:
+                    # 没等到也继续，走通用读取
+                    pass
+
+            async def read_text() -> str:
+                if selector:
+                    loc = page.locator(selector)
+                    count = await loc.count()
+                    if count == 0:
+                        return ""
+                    texts = []
+                    limit = min(count, max_nodes_check)
+                    for i in range(limit):
+                        try:
+                            t = await loc.nth(i).inner_text()
+                            if t:
+                                texts.append(t)
+                        except Exception:
+                            pass
+                    return max(texts, key=len, default="").strip()
+                else:
+                    try:
+                        return (await page.locator("body").inner_text()).strip()
+                    except Exception:
+                        return ""
+
+            # 文本稳定：每 500ms 检查一次，连续 3 次长度不变且达到最小长度
+            stable = 0
+            last_len = -1
+            # 最多等待 timeout 秒（*2 是因为 0.5s 一次）
+            max_attempts = int(timeout * 2)
+            attempt = 0
+
+            while stable < 3 and attempt < max_attempts:
+                text = await read_text()
+                current_len = len(text)
+                
+                if current_len >= min_chars and current_len == last_len:
+                    stable += 1
+                else:
+                    stable = 0
+                
+                last_len = current_len
+                attempt += 1
+                
+                # 最后一次不用等待
+                if attempt < max_attempts and stable < 3:
+                    await page.wait_for_timeout(500)
+
+            final_text = await read_text()
+            return final_text.strip()
+            
+        except Exception as e:
+            print(f"Playwright fetch failed for {url}: {e}")
+            return ""
+        finally:
+            await context.close()
+            await browser.close()
+
+
 def extract_text_from_html(html: str, selector: str = "article") -> str:
     """从HTML中提取文本内容"""
     if not html:
@@ -322,12 +415,42 @@ def extract_text_from_html(html: str, selector: str = "article") -> str:
 
 
 async def fetch_web_content(url: str) -> Optional[str]:
-    """抓取网页内容"""
+    """抓取网页内容，根据WEB_LOADER_ENGINE配置选择不同模式"""
     try:
-        html = await fetch_html(url, timeout=WEB_SEARCH_TIMEOUT)
-        if html:
-            content = extract_text_from_html(html, selector="article")
-            return content if content else None
+        content = None
+        
+        if WEB_LOADER_ENGINE == "playwright":
+            # 使用 Playwright 模式
+            try:
+                content = await fetch_rendered_text(
+                    url, 
+                    selector="article",
+                    timeout=PLAYWRIGHT_TIMEOUT
+                )
+                if content and len(content.strip()) > 100:
+                    print(f"[WebContent] Playwright 模式成功抓取: {url}")
+                    return content
+                else:
+                    print(f"[WebContent] Playwright 模式内容不足，回退到 safe_web: {url}")
+            except Exception as e:
+                print(f"[WebContent] Playwright 模式失败 {url}: {e}")
+                print(f"[WebContent] 自动回退到 safe_web 模式...")
+        
+        # 使用 safe_web 模式（默认或回退）
+        try:
+            html = await fetch_html(url, timeout=WEB_SEARCH_TIMEOUT)
+            if html:
+                content = extract_text_from_html(html, selector="article")
+                if content and len(content.strip()) > 100:
+                    print(f"[WebContent] safe_web 模式成功抓取: {url}")
+                    return content
+                else:
+                    print(f"[WebContent] safe_web 模式内容不足: {url}")
+            else:
+                print(f"[WebContent] safe_web 模式无法获取HTML: {url}")
+        except Exception as e:
+            print(f"[WebContent] safe_web 模式失败 {url}: {e}")
+        
         return None
     except Exception as e:
         print(f"抓取网页内容失败 {url}: {e}")
